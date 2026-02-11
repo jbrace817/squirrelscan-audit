@@ -46,7 +46,7 @@ const authenticate = (req, res, next) => {
   next();
 };
 
-// Google Drive setup
+// Google Drive setup with service account
 const setupGoogleDrive = () => {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
     console.log('Google Drive not configured - skipping Drive uploads');
@@ -80,7 +80,7 @@ async function uploadToDrive(filePath, fileName, folderId) {
   };
 
   const media = {
-    mimeType: 'text/html',
+    mimeType: 'application/json',
     body: require('fs').createReadStream(filePath)
   };
 
@@ -133,19 +133,18 @@ function extractMetrics(reportContent, format) {
   try {
     const data = JSON.parse(reportContent);
     return {
-      scores: data.scores || {},
+      scores: data.score || {},
       summary: {
-        seo: data.scores?.seo || 0,
-        performance: data.scores?.performance || 0,
-        accessibility: data.scores?.accessibility || 0,
-        bestPractices: data.scores?.bestPractices || 0,
-        overall: data.scores?.overall || 0
+        overall: data.score?.overall || 0,
+        grade: data.score?.grade || 'N/A',
+        passed: data.summary?.passed || 0,
+        warnings: data.summary?.warnings || 0,
+        failed: data.summary?.failed || 0
       },
       issueCount: {
-        critical: data.issues?.filter(i => i.severity === 'critical').length || 0,
-        high: data.issues?.filter(i => i.severity === 'high').length || 0,
-        medium: data.issues?.filter(i => i.severity === 'medium').length || 0,
-        low: data.issues?.filter(i => i.severity === 'low').length || 0
+        error: data.issues?.filter(i => i.severity === 'error').length || 0,
+        warning: data.issues?.filter(i => i.severity === 'warning').length || 0,
+        info: data.issues?.filter(i => i.severity === 'info').length || 0
       }
     };
   } catch (e) {
@@ -167,7 +166,8 @@ app.get('/', (req, res) => {
       audit: 'POST /audit',
       batch: 'POST /audit/batch'
     },
-    authentication: 'Required: x-api-key header'
+    authentication: 'Required: x-api-key header',
+    readme: 'See README.md for n8n integration examples'
   });
 });
 
@@ -181,7 +181,6 @@ app.get('/test', authenticate, async (req, res) => {
   };
 
   // Test SquirrelScan - try both 'squirrel' and 'squirrelscan' commands
-  // Local Mac installations may use 'squirrel', Docker uses 'squirrelscan'
   try {
     const { stdout } = await execPromise('squirrel --version', { timeout: 5000 });
     tests.squirrelscan = stdout.trim();

@@ -1,0 +1,228 @@
+{
+  "name": "SquirrelScan Batch Audit Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 2
+            }
+          ]
+        }
+      },
+      "name": "Schedule Daily at 2 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetName": "Audit Queue",
+        "range": "A2:C100",
+        "options": {}
+      },
+      "name": "Google Sheets - Read Pending",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract URLs from sheet\nconst urls = items\n  .filter(item => item.json['Status'] === 'Pending')\n  .map(item => item.json['Website URL'])\n  .filter(url => url && url.trim().length > 0);\n\nif (urls.length === 0) {\n  return [{ json: { message: 'No pending audits found', urls: [] } }];\n}\n\nreturn [{\n  json: {\n    urls: urls,\n    totalCount: urls.length,\n    message: `Processing ${urls.length} audits`\n  }\n}];"
+      },
+      "name": "Prepare URLs",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://your-railway-url.up.railway.app/audit/batch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "options": {
+          "timeout": 600000
+        },
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"urls\": {{ $json.urls }},\n  \"format\": \"html\",\n  \"uploadToDrive\": true\n}"
+      },
+      "name": "Run Batch Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2",
+          "name": "Railway API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse batch audit results\nconst results = $input.item.json.results;\n\nif (!results || results.length === 0) {\n  return [];\n}\n\nreturn results.map(result => ({\n  json: {\n    url: result.url,\n    success: result.success,\n    driveLink: result.drive?.viewLink || 'N/A',\n    seoScore: result.metrics?.summary?.seo || 0,\n    perfScore: result.metrics?.summary?.performance || 0,\n    accessibilityScore: result.metrics?.summary?.accessibility || 0,\n    overallScore: result.metrics?.summary?.overall || 0,\n    auditDate: new Date().toLocaleDateString(),\n    status: result.success ? 'Completed' : 'Failed',\n    errorMessage: result.error || ''\n  }\n}));"
+      },
+      "name": "Parse Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetName": "Audit Queue",
+        "dataMode": "autoMapInputData",
+        "columnToMatchOn": "Website URL",
+        "options": {}
+      },
+      "name": "Update Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.overallScore }}",
+              "operation": "smaller",
+              "value2": 75
+            }
+          ]
+        }
+      },
+      "name": "Qualified for Outreach?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "Qualified Leads",
+        "dataMode": "autoMapInputData",
+        "options": {}
+      },
+      "name": "Add to Qualified Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [1650, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Daily at 2 AM": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Read Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Read Pending": {
+      "main": [
+        [
+          {
+            "node": "Prepare URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare URLs": {
+      "main": [
+        [
+          {
+            "node": "Run Batch Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Batch Audit": {
+      "main": [
+        [
+          {
+            "node": "Parse Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Results": {
+      "main": [
+        [
+          {
+            "node": "Update Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Qualified for Outreach?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualified for Outreach?": {
+      "main": [
+        [
+          {
+            "node": "Add to Qualified Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "pinData": {}
+}
